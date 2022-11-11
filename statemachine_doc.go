@@ -22,6 +22,8 @@ type StateMachineDocumentation interface {
 	// can be used to generate documentation or to generate a state machine
 	// diagram
 	AsJSON() ([]byte, error)
+
+	Export() StateMachineJSON
 }
 
 type stateMachineDocumentation struct {
@@ -64,9 +66,11 @@ type TransitionRuleDoc struct {
 }
 
 type StateMachineJSON struct {
-	TransitionRules []TransitionRuleJSON          `json:"transition_rules"`
-	States          map[string]StateJSON          `json:"states"`
-	TransitionTypes map[string]TransitionTypeJSON `json:"transition_types"`
+	TransitionRuleNodes []TransitionRuleNode          `json:"transition_rules_nodes"`
+	TransitionRuleEdges []TransitionRuleEdge          `json:"transition_rules_edges"`
+	TransitionRules     []TransitionRuleJSON          `json:"transition_rules"`
+	States              map[string]StateJSON          `json:"states"`
+	TransitionTypes     map[string]TransitionTypeJSON `json:"transition_types"`
 }
 
 type StateJSON struct {
@@ -77,6 +81,18 @@ type StateJSON struct {
 type TransitionTypeJSON struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+type TransitionRuleEdge struct {
+	From        string `json:"from,omitempty"` // from is set if this is an edge
+	To          string `json:"to,omitempty"`   // to is set if this is an edge
+	Description string `json:"description,omitempty"`
+	Name        string `json:"name,omitempty"` // assign a label to the edge
+}
+
+type TransitionRuleNode struct {
+	ID          string `json:"id,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type TransitionRuleJSON struct {
@@ -100,7 +116,7 @@ func (sm *stateMachine) DescribeTransitionType(transitionType TransitionType, tr
 	sm.transitionTypeDocs[transitionType] = transitionTypeDocumentation
 }
 
-func (sm *stateMachine) AsJSON() ([]byte, error) {
+func (sm *stateMachine) Export() StateMachineJSON {
 	// Generate a sorted list of all states to avoid non-deterministic JSON
 	// output
 	keys := make([]TransitionType, 0, len(sm.transitionRules))
@@ -132,6 +148,16 @@ func (sm *stateMachine) AsJSON() ([]byte, error) {
 				Name:             rule.Documentation.Name,
 				Description:      rule.Documentation.Description,
 			})
+
+			// populate nodes
+			for _, sourceState := range sourceStates {
+				stateMachineJSON.TransitionRuleEdges = append(stateMachineJSON.TransitionRuleEdges, TransitionRuleEdge{
+					From:        string(sourceState),
+					To:          string(destState),
+					Description: rule.Documentation.Description,
+					Name:        string(transition),
+				})
+			}
 		}
 	}
 
@@ -141,6 +167,13 @@ func (sm *stateMachine) AsJSON() ([]byte, error) {
 			Name:        stateDoc.Name,
 			Description: stateDoc.Description,
 		}
+
+		// populate edges
+		stateMachineJSON.TransitionRuleNodes = append(stateMachineJSON.TransitionRuleNodes, TransitionRuleNode{
+			ID:          stateDoc.Name,
+			Description: stateDoc.Description,
+		})
+
 	}
 
 	stateMachineJSON.TransitionTypes = make(map[string]TransitionTypeJSON)
@@ -151,10 +184,73 @@ func (sm *stateMachine) AsJSON() ([]byte, error) {
 		}
 	}
 
-	marshaled, err := json.MarshalIndent(stateMachineJSON, "", "  ")
+	return stateMachineJSON
+}
+
+func (sm *stateMachine) AsJSON() ([]byte, error) {
+	marshaled, err := json.MarshalIndent(sm.Export(), "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal state machine to JSON: %w", err)
 	}
 
 	return marshaled, nil
 }
+
+//func (sm *stateMachine) AsJSON() ([]byte, error) {
+//	// Generate a sorted list of all states to avoid non-deterministic JSON
+//	// output
+//	keys := make([]TransitionType, 0, len(sm.transitionRules))
+//	for tt := range sm.transitionRules {
+//		keys = append(keys, tt)
+//	}
+//	sort.Slice(keys, func(i, j int) bool {
+//		return string(keys[i]) < string(keys[j])
+//	})
+//
+//	stateMachineJSON := StateMachineJSON{}
+//	for _, transition := range keys {
+//		for _, rule := range sm.transitionRules[transition] {
+//			var sourceStates []string
+//			if len(rule.SourceStates) == 1 && rule.SourceStates[0] == State("") {
+//				sourceStates = []string{"initial"}
+//			} else {
+//				sourceStates = make([]string, len(rule.SourceStates))
+//				for i, state := range rule.SourceStates {
+//					sourceStates[i] = string(state)
+//				}
+//			}
+//			destState := string(rule.DestinationState)
+//
+//			stateMachineJSON.TransitionRules = append(stateMachineJSON.TransitionRules, TransitionRuleJSON{
+//				TransitionType:   transition,
+//				SourceStates:     sourceStates,
+//				DestinationState: destState,
+//				Name:             rule.Documentation.Name,
+//				Description:      rule.Documentation.Description,
+//			})
+//		}
+//	}
+//
+//	stateMachineJSON.States = make(map[string]StateJSON)
+//	for stateID, stateDoc := range sm.stateDocs {
+//		stateMachineJSON.States[string(stateID)] = StateJSON{
+//			Name:        stateDoc.Name,
+//			Description: stateDoc.Description,
+//		}
+//	}
+//
+//	stateMachineJSON.TransitionTypes = make(map[string]TransitionTypeJSON)
+//	for transitionTypeID, transitionTypeDoc := range sm.transitionTypeDocs {
+//		stateMachineJSON.TransitionTypes[string(transitionTypeID)] = TransitionTypeJSON{
+//			Name:        transitionTypeDoc.Name,
+//			Description: transitionTypeDoc.Description,
+//		}
+//	}
+//
+//	marshaled, err := json.MarshalIndent(stateMachineJSON, "", "  ")
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to marshal state machine to JSON: %w", err)
+//	}
+//
+//	return marshaled, nil
+//}
